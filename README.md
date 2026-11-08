@@ -79,6 +79,23 @@ export APPLE_TEAM_ID="TEAMID"
 
 The bundled Java runtime is signed with the same identity and the entitlements in `src-tauri/Entitlements.plist`. Without these variables the build falls back to ad-hoc signing. Check the result with `codesign --verify --deep --strict --verbose=2 "MPP Viewer.app"` and `spctl -a -vv "MPP Viewer.app"`.
 
+### Releasing
+
+Releases are automatic. Change `version` in `src-tauri/tauri.conf.json` (and the same number in `package.json` and `src-tauri/Cargo.toml`) and merge to `main`. If there's no release for that version yet, GitHub Actions builds a signed, notarised Apple Silicon `.dmg`, tags `vX.Y.Z` and publishes the release. Run the workflow by hand from the Actions tab to get a test build without publishing.
+
+CI needs these repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+| --- | --- |
+| `APPLE_CERTIFICATE` | base64 of the Developer ID Application `.p12` (`base64 -i cert.p12 \| pbcopy`) |
+| `APPLE_CERTIFICATE_PASSWORD` | password used when exporting the `.p12` |
+| `APPLE_SIGNING_IDENTITY` | `Developer ID Application: Lee Simpson (62NZPLH52Q)` |
+| `APPLE_ID` | Apple ID email |
+| `APPLE_PASSWORD` | app-specific password |
+| `APPLE_TEAM_ID` | `62NZPLH52Q` |
+
+Without them the build still runs, ad-hoc signed and not notarised.
+
 For UI-only work you can run `npm run dev` and open `http://localhost:1420/?sample` in a browser. It loads `samples/office-fitout.json` (made with the converter) without needing Tauri.
 
 To regenerate the sample plan:
