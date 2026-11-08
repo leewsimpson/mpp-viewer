@@ -47,6 +47,23 @@ if [[ "$(uname)" == "Darwin" ]]; then
       | xargs -0 codesign --force --options runtime --timestamp \
           --entitlements "$ROOT/src-tauri/Entitlements.plist" \
           --sign "$APPLE_SIGNING_IDENTITY"
+
+    # Apple's notary service also scans inside jars: dependencies such as
+    # sqlite-jdbc ship unsigned .dylib files in them. Sign those and put them
+    # back in the jar.
+    for JAR in "$DIST"/lib/*.jar; do
+      NATIVES="$(unzip -Z1 "$JAR" | grep -E '\.(dylib|jnilib)$' || true)"
+      [[ -n "$NATIVES" ]] || continue
+      echo "==> Signing native libraries inside $(basename "$JAR")"
+      WORK="$(mktemp -d)"
+      unzip -q "$JAR" '*.dylib' '*.jnilib' -d "$WORK" || true
+      while IFS= read -r N; do
+        codesign --force --options runtime --timestamp \
+          --sign "$APPLE_SIGNING_IDENTITY" "$WORK/$N"
+      done <<< "$NATIVES"
+      (cd "$WORK" && echo "$NATIVES" | zip -q "$JAR" -@)
+      rm -rf "$WORK"
+    done
   else
     echo "==> Ad-hoc signing runtime binaries (required on Apple Silicon)"
     find "$DIST/runtime" -type f \( -perm -u+x -o -name "*.dylib" \) -print0 \
