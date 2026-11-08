@@ -6,10 +6,7 @@ Open `.mpp`, `.mpt` or Project `.xml` files and see the task list and Gantt char
 
 ## Download
 
-Get the latest disk image from the [Releases page](../../releases):
-
-- **Apple Silicon** (M1 or later): `MPP-Viewer-<version>-apple-silicon.dmg`
-- **Intel Macs**: `MPP-Viewer-<version>-intel.dmg`
+Get `MPP-Viewer-<version>.dmg` from the [Releases page](../../releases). It's built for Apple Silicon Macs (M1 or later).
 
 Open the `.dmg` and drag **MPP Viewer** to Applications. The app isn't notarised by Apple, so macOS will block it the first time. Run this once in Terminal:
 
@@ -52,11 +49,11 @@ Builds run on GitHub Actions (`.github/workflows/release.yml`), so you don't nee
    git tag v0.1.0
    git push origin v0.1.0
    ```
-3. About 10 minutes later, both `.dmg` files appear on the Releases page.
+3. About 10 minutes later, the `.dmg` appears on the Releases page.
 
-You can also start a build from the **Actions** tab (**Build & Release → Run workflow**). That builds the disk images without publishing a release; download them from the run's **Artifacts** section.
+You can also create the tag from GitHub's web UI: **Releases → Draft a new release → Choose a tag → type `v0.1.0` → Create new tag**, then publish. The workflow attaches the disk image to that release.
 
-You can also create the tag from GitHub's web UI: **Releases → Draft a new release → Choose a tag → type `v0.1.0` → Create new tag**, then publish. The workflow attaches the disk images to that release.
+To build without publishing, use the **Actions** tab (**Build & Release → Run workflow**) and download the image from the run's **Artifacts** section.
 
 ## Building locally
 

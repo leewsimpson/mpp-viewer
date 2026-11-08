@@ -1,6 +1,6 @@
 [package]
 name = "mpp-viewer"
-version = "0.1.0"
+version = "0.1.1"
 description = "Offline viewer for Microsoft Project files on macOS"
 edition = "2021"
 
