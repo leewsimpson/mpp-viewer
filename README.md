@@ -66,6 +66,19 @@ npm run tauri dev        # run the app in development mode
 npm run app              # build a release .app and .dmg into src-tauri/target/release/bundle
 ```
 
+### Signing and notarising (macOS)
+
+Needs a **Developer ID Application** certificate in your keychain. Set these in your shell (never commit them), then run `npm run app`:
+
+```bash
+export APPLE_SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+export APPLE_ID="you@example.com"
+export APPLE_PASSWORD="app-specific-password"   # from appleid.apple.com
+export APPLE_TEAM_ID="TEAMID"
+```
+
+The bundled Java runtime is signed with the same identity and the entitlements in `src-tauri/Entitlements.plist`. Without these variables the build falls back to ad-hoc signing. Check the result with `codesign --verify --deep --strict --verbose=2 "MPP Viewer.app"` and `spctl -a -vv "MPP Viewer.app"`.
+
 For UI-only work you can run `npm run dev` and open `http://localhost:1420/?sample` in a browser. It loads `samples/office-fitout.json` (made with the converter) without needing Tauri.
 
 To regenerate the sample plan:

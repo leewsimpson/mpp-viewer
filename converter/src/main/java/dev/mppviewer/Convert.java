@@ -1,6 +1,8 @@
 package dev.mppviewer;
 
 import java.io.File;
+import java.io.FileDescriptor;
+import java.io.FileOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
@@ -32,6 +34,12 @@ public final class Convert {
             System.err.println("Usage: mpp-converter <file.mpp>");
             System.exit(1);
         }
+        // stdout carries only the JSON. Libraries (e.g. Log4j's status logger, which
+        // POI triggers when reading .mpp files) may print to System.out, so keep the
+        // real stdout aside and send anything else to stderr.
+        PrintStream jsonOut = new PrintStream(new FileOutputStream(FileDescriptor.out), false, StandardCharsets.UTF_8);
+        System.setOut(System.err);
+
         File file = new File(args[0]);
         if (!file.isFile()) {
             System.err.println("File not found: " + file);
@@ -43,9 +51,8 @@ public final class Convert {
                 System.err.println("Unsupported or unrecognised file format: " + file.getName());
                 System.exit(2);
             }
-            PrintStream out = new PrintStream(System.out, false, StandardCharsets.UTF_8);
-            out.print(toJson(project, file.getName()));
-            out.flush();
+            jsonOut.print(toJson(project, file.getName()));
+            jsonOut.flush();
         } catch (Exception e) {
             String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             System.err.println("Could not read " + file.getName() + ": " + msg);

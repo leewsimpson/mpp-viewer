@@ -35,15 +35,27 @@ jlink \
   --output "$DIST/runtime"
 
 if [[ "$(uname)" == "Darwin" ]]; then
-  echo "==> Ad-hoc signing runtime binaries (required on Apple Silicon)"
-  find "$DIST/runtime" -type f \( -perm -u+x -o -name "*.dylib" \) -print0 \
-    | xargs -0 codesign --force --sign - --timestamp=none 2>/dev/null || true
+  if [[ -n "${APPLE_SIGNING_IDENTITY:-}" ]]; then
+    # Notarisation needs every nested binary signed with the hardened runtime
+    # and a secure timestamp, using the same identity as the app.
+    echo "==> Signing runtime binaries with: $APPLE_SIGNING_IDENTITY"
+    find "$DIST/runtime" -type f \( -perm -u+x -o -name "*.dylib" \) -print0 \
+      | xargs -0 codesign --force --options runtime --timestamp \
+          --entitlements "$ROOT/src-tauri/Entitlements.plist" \
+          --sign "$APPLE_SIGNING_IDENTITY"
+  else
+    echo "==> Ad-hoc signing runtime binaries (required on Apple Silicon)"
+    find "$DIST/runtime" -type f \( -perm -u+x -o -name "*.dylib" \) -print0 \
+      | xargs -0 codesign --force --sign - --timestamp=none 2>/dev/null || true
+  fi
 fi
 
 echo "==> Smoke test"
 SAMPLE="$ROOT/samples/office-fitout.xml"
 if [[ -f "$SAMPLE" ]]; then
-  "$DIST/runtime/bin/java" -jar "$DIST/mpp-converter.jar" "$SAMPLE" > /dev/null
+  # stdout must be pure JSON: stray library output there breaks the viewer's parser.
+  FIRST="$("$DIST/runtime/bin/java" -jar "$DIST/mpp-converter.jar" "$SAMPLE" 2>/dev/null | head -c 1)"
+  [[ "$FIRST" == "{" ]] || { echo "Converter stdout is not pure JSON" >&2; exit 1; }
   echo "    converted sample OK"
 fi
 
