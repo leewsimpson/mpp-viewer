@@ -34,6 +34,10 @@ jlink \
   --compress zip-6 \
   --output "$DIST/runtime"
 
+# jlink output has read-only files; Tauri copies them on every build and
+# can't overwrite its own read-only copies ("Permission denied").
+chmod -R u+w "$DIST"
+
 if [[ "$(uname)" == "Darwin" ]]; then
   if [[ -n "${APPLE_SIGNING_IDENTITY:-}" ]]; then
     # Notarisation needs every nested binary signed with the hardened runtime
