@@ -8,13 +8,7 @@ Open `.mpp`, `.mpt` or Project `.xml` files and see the task list and Gantt char
 
 Get `MPP-Viewer-<version>.dmg` from the [Releases page](../../releases). It's built for Apple Silicon Macs (M1 or later).
 
-Open the `.dmg` and drag **MPP Viewer** to Applications. The app isn't notarised by Apple, so macOS will block it the first time. Run this once in Terminal:
-
-```bash
-xattr -dr com.apple.quarantine "/Applications/MPP Viewer.app"
-```
-
-Then open it normally. You can also double-click `.mpp` files or drag them onto the window.
+Open the `.dmg` and drag **MPP Viewer** to Applications, then open it normally. The app is signed with a Developer ID and notarised by Apple, so macOS opens it without extra steps. (Versions before 0.1.2 weren't notarised and need `xattr -dr com.apple.quarantine "/Applications/MPP Viewer.app"` run once in Terminal.) You can also double-click `.mpp` files or drag them onto the window.
 
 ## Features
 
