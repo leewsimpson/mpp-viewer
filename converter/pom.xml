@@ -13,6 +13,8 @@
     <maven.compiler.release>21</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <mpxj.version>16.11.0</mpxj.version>
+    <junit.version>6.1.3</junit.version>
+    <golden.update>false</golden.update>
   </properties>
 
   <dependencies>
@@ -35,11 +37,32 @@
         <exclusion><groupId>org.apache.commons</groupId><artifactId>commons-math3</artifactId></exclusion>
       </exclusions>
     </dependency>
+
+    <!-- Test scope: not bundled. Don't add libraries MPXJ itself might use here,
+         or the tests would no longer run on the trimmed set the app ships. -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>${junit.version}</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
     <finalName>mpp-converter</finalName>
     <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.6.1</version>
+        <configuration>
+          <!-- Same headless mode the app runs the converter in. -->
+          <argLine>-Djava.awt.headless=true</argLine>
+          <systemPropertyVariables>
+            <golden.update>${golden.update}</golden.update>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
       <!-- MPXJ (LGPL) and its dependencies stay as separate, unmodified jars in lib/,
            referenced from the manifest, so they can be swapped out independently. -->
       <plugin>

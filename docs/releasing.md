@@ -7,7 +7,7 @@ Releases are built by GitHub Actions (`.github/workflows/release.yml`), so no lo
 1. Change `version` in `package.json`. The app reads its version from there. `npm version 0.1.3 --no-git-tag-version` updates `package-lock.json` too.
 2. Merge to `main`.
 
-If there's no release for that version yet, the workflow builds a signed, notarised Apple Silicon `.dmg`, tags `vX.Y.Z` and publishes the release.
+If there's no release for that version yet, the workflow runs the tests (the same ones as on pull requests), then builds a signed, notarised Apple Silicon `.dmg`, tags `vX.Y.Z` and publishes the release.
 
 To get a test build without publishing, open the **Actions** tab, choose **Build & Release → Run workflow**, then download the `.dmg` from the run's **Artifacts** section.
 

@@ -71,9 +71,15 @@ jobs:
           echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
           echo "Version $VERSION, publish=$PUBLISH"
 
+  # The same tests as on pull requests (ci.yml); nothing is built or
+  # released unless they pass.
+  test:
+    name: Tests
+    uses: ./.github/workflows/ci.yml
+
   build:
     name: Build (Apple Silicon)
-    needs: version
+    needs: [version, test]
     # Pushes only build when they would publish a new version; manual runs
     # always build.
     if: needs.version.outputs.publish == 'true' || github.event_name == 'workflow_dispatch'

@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.mpxj.Duration;
+import org.mpxj.MPXJException;
 import org.mpxj.ProjectCalendar;
 import org.mpxj.ProjectFile;
 import org.mpxj.ProjectProperties;
@@ -71,10 +72,18 @@ public final class Convert {
             errOut.println(file.getName() + " is too large to open.");
             System.exit(2);
         } catch (Exception e) {
-            String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            errOut.println("Could not read " + file.getName() + ": " + msg);
+            errOut.println(errorMessage(e, file.getName()));
             System.exit(2);
         }
+    }
+
+    /** The one-line message the app shows when a file can't be read. */
+    static String errorMessage(Exception e, String fileName) {
+        String msg = e.getMessage();
+        if (e instanceof MPXJException && msg != null && msg.startsWith(MPXJException.PASSWORD_PROTECTED)) {
+            return fileName + " is password protected. MPP Viewer can't open password-protected files.";
+        }
+        return "Could not read " + fileName + ": " + (msg == null ? e.getClass().getSimpleName() : msg);
     }
 
     static String toJson(ProjectFile project, String fileName) {
@@ -177,7 +186,7 @@ public final class Convert {
         }
     }
 
-    private static String formatDuration(Duration d) {
+    static String formatDuration(Duration d) {
         if (d == null) return null;
         double v = d.getDuration();
         // Up to two decimals, no trailing zeros, independent of the Mac's locale
