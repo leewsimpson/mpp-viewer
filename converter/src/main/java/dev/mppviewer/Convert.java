@@ -3,13 +3,18 @@ package dev.mppviewer;
 import java.io.File;
 import java.io.FileDescriptor;
 import java.io.FileOutputStream;
+import java.io.OutputStream;
 import java.io.PrintStream;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
+import java.time.DayOfWeek;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
 import org.mpxj.Duration;
+import org.mpxj.ProjectCalendar;
 import org.mpxj.ProjectFile;
 import org.mpxj.ProjectProperties;
 import org.mpxj.Relation;
@@ -30,32 +35,44 @@ public final class Convert {
     private Convert() {}
 
     public static void main(String[] args) {
+        // stdout carries only the JSON, and the app shows stderr to the user when a
+        // file can't be read. Libraries print status noise to both (Log4j's "could
+        // not find a logging provider", which POI triggers on every .mpp file), so
+        // keep the real streams for our own output and discard everything else.
+        PrintStream jsonOut = new PrintStream(new FileOutputStream(FileDescriptor.out), false, StandardCharsets.UTF_8);
+        PrintStream errOut = new PrintStream(new FileOutputStream(FileDescriptor.err), true, StandardCharsets.UTF_8);
+        PrintStream discard = new PrintStream(OutputStream.nullOutputStream());
+        System.setOut(discard);
+        System.setErr(discard);
+
         if (args.length != 1) {
-            System.err.println("Usage: mpp-converter <file.mpp>");
+            errOut.println("Usage: mpp-converter <file.mpp>");
             System.exit(1);
         }
-        // stdout carries only the JSON. Libraries (e.g. Log4j's status logger, which
-        // POI triggers when reading .mpp files) may print to System.out, so keep the
-        // real stdout aside and send anything else to stderr.
-        PrintStream jsonOut = new PrintStream(new FileOutputStream(FileDescriptor.out), false, StandardCharsets.UTF_8);
-        System.setOut(System.err);
-
         File file = new File(args[0]);
         if (!file.isFile()) {
-            System.err.println("File not found: " + file);
+            errOut.println("File not found: " + file);
             System.exit(2);
         }
         try {
             ProjectFile project = new UniversalProjectReader().read(file);
             if (project == null) {
-                System.err.println("Unsupported or unrecognised file format: " + file.getName());
+                errOut.println("Unsupported or unrecognised file format: " + file.getName());
                 System.exit(2);
             }
             jsonOut.print(toJson(project, file.getName()));
             jsonOut.flush();
+        } catch (LinkageError e) {
+            // A reader needs a library the app leaves out (see converter/pom.xml),
+            // e.g. Primavera or Asta SQLite databases.
+            errOut.println(file.getName() + " is in a format MPP Viewer doesn't support.");
+            System.exit(2);
+        } catch (OutOfMemoryError e) {
+            errOut.println(file.getName() + " is too large to open.");
+            System.exit(2);
         } catch (Exception e) {
             String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            System.err.println("Could not read " + file.getName() + ": " + msg);
+            errOut.println("Could not read " + file.getName() + ": " + msg);
             System.exit(2);
         }
     }
@@ -71,6 +88,17 @@ public final class Convert {
         j.key("author").value(props.getAuthor());
         j.key("start").value(props.getStartDate());
         j.key("finish").value(props.getFinishDate());
+        // Working days of the project calendar, as JavaScript day numbers
+        // (0 = Sunday), so the chart can shade the right days as non-working.
+        ProjectCalendar cal = project.getDefaultCalendar();
+        j.key("workingDays").beginArray();
+        for (DayOfWeek day : DayOfWeek.values()) {
+            boolean working = cal == null
+                    ? day != DayOfWeek.SATURDAY && day != DayOfWeek.SUNDAY
+                    : cal.isWorkingDay(day);
+            if (working) j.value(day.getValue() % 7);
+        }
+        j.endArray();
         j.endObject();
 
         j.key("tasks").beginArray();
@@ -152,7 +180,11 @@ public final class Convert {
     private static String formatDuration(Duration d) {
         if (d == null) return null;
         double v = d.getDuration();
-        String num = (v == Math.rint(v)) ? String.valueOf((long) v) : String.format("%.2f", v).replaceAll("0+$", "");
+        // Up to two decimals, no trailing zeros, independent of the Mac's locale
+        // (2.999 -> "3", 2.5 -> "2.5").
+        String num = Double.isFinite(v)
+                ? BigDecimal.valueOf(v).setScale(2, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
+                : "0";
         String unit;
         switch (d.getUnits()) {
             case MINUTES: case ELAPSED_MINUTES: unit = "m"; break;

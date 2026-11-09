@@ -34,7 +34,7 @@ Press <kbd>⌘O</kbd> to open a file, double-click a `.mpp` file in Finder, or d
 
 - Read-only: you can view plans but not edit them.
 - Password-protected `.mpp` files can't be opened.
-- The app is about 100 MB because it bundles its own Java runtime.
+- The app is about 90 MB because it bundles its own Java runtime.
 
 ## Contributing
 
@@ -42,4 +42,4 @@ Bug reports and pull requests are welcome. See [docs/development.md](docs/develo
 
 ## Acknowledgements
 
-Reading `.mpp` files is done by [MPXJ](https://github.com/joniles/mpxj), licensed under the LGPL and bundled unmodified as separate jars. The app shell is built with [Tauri](https://tauri.app).
+Reading `.mpp` files is done by [MPXJ](https://github.com/joniles/mpxj), licensed under the LGPL and bundled unmodified as separate jars. See [third-party notices](converter/licenses/THIRD-PARTY-NOTICES.md) for all bundled libraries. The app shell is built with [Tauri](https://tauri.app).

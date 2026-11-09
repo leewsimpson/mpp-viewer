@@ -1,7 +1,8 @@
 name: Build & Release
 
-# Automatic release: bump "version" in src-tauri/tauri.conf.json (keep
-# package.json and src-tauri/Cargo.toml in step) and merge to main. If there
+# Automatic release: bump "version" in package.json (the app reads it from
+# there; `npm version X.Y.Z --no-git-tag-version` also updates package-lock.json)
+# and merge to main. If there
 # is no release for that version yet, this builds a signed, notarised Apple
 # Silicon app, tags vX.Y.Z and publishes a GitHub Release with the .dmg.
 #
@@ -54,12 +55,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION=$(jq -r .version src-tauri/tauri.conf.json)
+          VERSION=$(jq -r .version package.json)
           TAG="v${VERSION}"
-          PKG=$(jq -r .version package.json)
-          CARGO=$(grep -m1 '^version' src-tauri/Cargo.toml | cut -d'"' -f2)
-          if [[ "$PKG" != "$VERSION" || "$CARGO" != "$VERSION" ]]; then
-            echo "::error::Version mismatch: tauri.conf.json=$VERSION package.json=$PKG Cargo.toml=$CARGO"
+          if [[ "$(jq -r .version src-tauri/tauri.conf.json)" != "../package.json" ]]; then
+            echo "::error::src-tauri/tauri.conf.json should read its version from package.json"
             exit 1
           fi
           PUBLISH=false

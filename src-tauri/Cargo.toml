@@ -1,6 +1,7 @@
 [package]
 name = "mpp-viewer"
-version = "0.1.2"
+# The app version comes from package.json (see tauri.conf.json); this one is unused.
+version = "0.0.0"
 description = "Offline viewer for Microsoft Project files on macOS"
 edition = "2021"
 

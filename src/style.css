@@ -177,7 +177,7 @@ button.primary:hover { filter: brightness(1.08); }
   border-bottom: 1px solid transparent;
   cursor: default;
 }
-#grid-body .row:nth-child(even) { background: var(--bg-stripe); }
+#grid-body .row.odd { background: var(--bg-stripe); }
 .row > div {
   padding: 0 6px;
   overflow: hidden;

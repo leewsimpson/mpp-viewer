@@ -3,7 +3,7 @@ import { Gantt, fmtDate, escapeHtml } from "./gantt.js";
 const isTauri = "__TAURI_INTERNALS__" in window;
 const $ = (id) => document.getElementById(id);
 
-const FILE_TYPES = ["mpp", "mpt", "xml", "mpx", "xer", "pmxml", "planner", "gan", "pp", "pod", "fts"];
+const FILE_TYPES = ["mpp", "mpt", "mpd", "xml", "mpx", "xer", "pmxml", "planner", "gan", "pp", "pod", "fts"];
 
 const gantt = new Gantt({
   gridBody: $("grid-body"),
@@ -34,16 +34,22 @@ async function pickFile() {
   if (path) openPath(path);
 }
 
+// Only the most recently requested file is shown, even if an earlier, slower
+// one finishes after it.
+let openRequest = 0;
+
 async function openPath(path) {
+  const request = ++openRequest;
   setLoading(true);
   try {
     const { invoke } = await import("@tauri-apps/api/core");
-    const json = await invoke("open_project", { path });
-    showProject(JSON.parse(json));
+    // The backend passes the converter's JSON through, so this is already parsed.
+    const data = await invoke("open_project", { path });
+    if (request === openRequest) showProject(data);
   } catch (e) {
-    showError(String(e));
+    if (request === openRequest) showError(String(e));
   } finally {
-    setLoading(false);
+    if (request === openRequest) setLoading(false);
   }
 }
 
@@ -87,8 +93,7 @@ function showDetails(t) {
       return `<li>${escapeHtml(pt ? `${pt.id ?? ""} ${pt.name ?? ""}` : `#${p.uid}`)} <span class="muted">${p.type}${lag}</span></li>`;
     })
     .join("");
-  const succs = gantt.tasks
-    .filter((s) => (s.predecessors || []).some((p) => p.uid === t.uid))
+  const succs = (gantt.successors.get(t.uid) || [])
     .map((s) => `<li>${escapeHtml(`${s.id ?? ""} ${s.name ?? ""}`)}</li>`)
     .join("");
   const row = (label, value) => (value ? `<dt>${label}</dt><dd>${value}</dd>` : "");
@@ -164,6 +169,7 @@ $("search").addEventListener("keydown", (e) => {
   } else if (e.key === "Escape") {
     e.target.value = "";
     matchList = gantt.search("");
+    matchIndex = -1;
   }
 });
 
@@ -216,9 +222,13 @@ splitter.addEventListener("pointerdown", (e) => {
   const up = () => {
     splitter.removeEventListener("pointermove", move);
     splitter.removeEventListener("pointerup", up);
+    splitter.removeEventListener("pointercancel", up);
+    // The chart is now a different width; redraw so its rows fill it.
+    if (currentFile) gantt.render();
   };
   splitter.addEventListener("pointermove", move);
   splitter.addEventListener("pointerup", up);
+  splitter.addEventListener("pointercancel", up);
 });
 
 // Keyboard shortcuts.
@@ -230,7 +240,7 @@ document.addEventListener("keydown", (e) => {
   } else if (mod && e.key.toLowerCase() === "f") {
     e.preventDefault();
     $("search").focus();
-  } else if (document.activeElement?.tagName !== "INPUT" && currentFile) {
+  } else if (!["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName) && currentFile) {
     if (e.key === "ArrowDown") (e.preventDefault(), gantt.moveSelection(1));
     else if (e.key === "ArrowUp") (e.preventDefault(), gantt.moveSelection(-1));
     else if (e.key === "Escape") gantt.select(null);
@@ -244,7 +254,15 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-window.addEventListener("resize", () => currentFile && gantt.render());
+// Re-render at most once per frame while the window is being resized.
+let resizeFrame = 0;
+window.addEventListener("resize", () => {
+  if (!currentFile || resizeFrame) return;
+  resizeFrame = requestAnimationFrame(() => {
+    resizeFrame = 0;
+    gantt.render();
+  });
+});
 
 // ---------- Drag and drop / OS "Open With" ----------
 
