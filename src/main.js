@@ -194,20 +194,22 @@ $("bars").addEventListener("click", (e) => {
 const gridBody = $("grid-body");
 const chartBody = $("chart-body");
 const chartHead = $("chart-head");
-let syncing = false;
+// Setting one pane's position makes it fire its own scroll event, which can
+// arrive a frame or more later (WebKit). By then the user may have scrolled
+// the other pane elsewhere, so that echo must not be copied back. Each pane
+// remembers the position we last gave it and ignores events reporting it.
+const synced = new Map([[gridBody, null], [chartBody, null]]);
+function syncScroll(from, to) {
+  if (from.scrollTop === synced.get(from)) return; // our own echo
+  to.scrollTop = from.scrollTop;
+  synced.set(from, from.scrollTop);
+  synced.set(to, to.scrollTop); // as clamped by the browser
+}
 chartBody.addEventListener("scroll", () => {
   chartHead.scrollLeft = chartBody.scrollLeft;
-  if (syncing) return;
-  syncing = true;
-  gridBody.scrollTop = chartBody.scrollTop;
-  requestAnimationFrame(() => (syncing = false));
+  syncScroll(chartBody, gridBody);
 });
-gridBody.addEventListener("scroll", () => {
-  if (syncing) return;
-  syncing = true;
-  chartBody.scrollTop = gridBody.scrollTop;
-  requestAnimationFrame(() => (syncing = false));
-});
+gridBody.addEventListener("scroll", () => syncScroll(gridBody, chartBody));
 
 // Draggable splitter between grid and chart.
 const splitter = $("splitter");
