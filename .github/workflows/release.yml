@@ -123,6 +123,10 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
           rm "$RUNNER_TEMP/cert.p12"
           security find-identity -v -p codesigning "$KEYCHAIN"
+          if ! security find-identity -v -p codesigning "$KEYCHAIN" | grep -qF "$APPLE_SIGNING_IDENTITY"; then
+            echo "::error::The APPLE_CERTIFICATE secret does not contain the identity named in APPLE_SIGNING_IDENTITY. Export the 'Developer ID Application' certificate with its private key."
+            exit 1
+          fi
 
       - name: Install JS dependencies
         run: npm ci
