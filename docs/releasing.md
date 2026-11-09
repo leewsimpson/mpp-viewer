@@ -4,7 +4,7 @@
 
 Releases are built by GitHub Actions (`.github/workflows/release.yml`), so no local developer tools are needed.
 
-1. Change `version` in `src-tauri/tauri.conf.json`, and use the same number in `package.json` and `src-tauri/Cargo.toml`.
+1. Change `version` in `package.json`. The app reads its version from there. `npm version 0.1.3 --no-git-tag-version` updates `package-lock.json` too.
 2. Merge to `main`.
 
 If there's no release for that version yet, the workflow builds a signed, notarised Apple Silicon `.dmg`, tags `vX.Y.Z` and publishes the release.
@@ -37,7 +37,7 @@ export APPLE_PASSWORD="app-specific-password"   # from appleid.apple.com
 export APPLE_TEAM_ID="TEAMID"
 ```
 
-The bundled Java runtime is signed with the same identity and the entitlements in `src-tauri/Entitlements.plist`. Without these variables the build falls back to ad-hoc signing.
+The bundled Java runtime is signed with the same identity. Its executables get the JIT entitlements in `converter/java-runtime.entitlements`; the app itself is signed without entitlements. Without these variables the build falls back to ad-hoc signing.
 
 Check the result with:
 

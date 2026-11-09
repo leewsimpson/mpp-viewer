@@ -1,9 +1,11 @@
 // Gantt view: task grid on the left, timeline on the right.
 // Plain DOM + SVG, no external libraries, so it works fully offline.
 
-const SVG = "http://www.w3.org/2000/svg";
 const DAY = 86400000;
 export const ROW = 28;
+// Rows drawn above and below the visible area, so normal scrolling never
+// shows a gap before the next frame fills it in.
+const OVERSCAN = 40;
 
 const ZOOMS = {
   day: { px: 30, minor: "day", major: "month" },
@@ -21,11 +23,12 @@ export function fmtDate(d) {
   return d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "2-digit" });
 }
 
-function el(tag, attrs = {}, parent) {
-  const n = document.createElementNS(SVG, tag);
-  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
-  if (parent) parent.appendChild(n);
-  return n;
+// Builds an SVG element as markup. Rendering whole charts as one string and
+// parsing it once is much faster than creating thousands of nodes one by one.
+function svg(tag, attrs, inner = "") {
+  let a = "";
+  for (const k in attrs) a += ` ${k}="${attrs[k]}"`;
+  return `<${tag}${a}>${inner}</${tag}>`;
 }
 
 function startOfDay(d) {
@@ -70,11 +73,27 @@ export class Gantt {
     this.chartBody = opts.chartBody;
     this.onSelect = opts.onSelect || (() => {});
     this.tasks = [];
+    this.vis = [];
     this.byUid = new Map();
     this.collapsed = new Set();
     this.selected = null;
     this.matches = new Set();
+    this.workingDays = new Set([1, 2, 3, 4, 5]);
     this.options = { zoom: "week", critical: false, baseline: false, links: true };
+    // Per drawn task: its grid row, chart row background and bar group, so
+    // selection and search can update highlights without a full re-render.
+    this.els = new Map();
+    // Only the rows in and near the viewport are in the DOM; scrolling draws
+    // the rest. Large plans would otherwise mean tens of thousands of nodes.
+    this.drawn = null;
+    let frame = 0;
+    this.chartBody.addEventListener("scroll", () => {
+      if (frame || !this.vis.length) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        this.renderRows();
+      });
+    });
   }
 
   load(data) {
@@ -87,14 +106,21 @@ export class Gantt {
     }));
     this.byUid = new Map(this.tasks.map((t) => [t.uid, t]));
     this.children = new Map();
+    this.successors = new Map();
     for (const t of this.tasks) {
       if (t.parent != null) {
         if (!this.children.has(t.parent)) this.children.set(t.parent, []);
         this.children.get(t.parent).push(t);
       }
+      for (const p of t.predecessors || []) {
+        if (!this.successors.has(p.uid)) this.successors.set(p.uid, []);
+        this.successors.get(p.uid).push(t);
+      }
     }
     // Treat any task with children as a summary, even if the file didn't flag it.
     for (const t of this.tasks) if (this.children.has(t.uid)) t.summary = true;
+    const wd = data.project?.workingDays;
+    this.workingDays = new Set(Array.isArray(wd) && wd.length ? wd : [1, 2, 3, 4, 5]);
     this.collapsed.clear();
     this.selected = null;
     this.matches.clear();
@@ -136,10 +162,6 @@ export class Gantt {
     return false;
   }
 
-  visible() {
-    return this.tasks.filter((t) => !this.isHidden(t));
-  }
-
   toggle(uid) {
     if (this.collapsed.has(uid)) this.collapsed.delete(uid);
     else this.collapsed.add(uid);
@@ -156,24 +178,45 @@ export class Gantt {
     this.render();
   }
 
+  // Expands any collapsed ancestors of a task. Returns true if anything changed.
   reveal(uid) {
+    let changed = false;
     let p = this.byUid.get(uid)?.parent;
     while (p != null) {
-      this.collapsed.delete(p);
+      changed = this.collapsed.delete(p) || changed;
       p = this.byUid.get(p)?.parent;
     }
+    return changed;
   }
 
   select(uid, scroll = false) {
+    const prev = this.selected;
     this.selected = uid;
-    if (uid != null) this.reveal(uid);
-    this.render();
+    if (uid != null && this.reveal(uid)) {
+      this.render();
+    } else {
+      this.highlight(prev);
+      this.highlight(uid);
+    }
     this.onSelect(uid == null ? null : this.byUid.get(uid));
     if (scroll && uid != null) this.scrollToTask(uid);
   }
 
+  // Brings one task's row and bar classes in line with the selection and matches.
+  highlight(uid) {
+    const e = uid == null ? null : this.els.get(uid);
+    if (!e) return;
+    const sel = uid === this.selected;
+    const match = this.matches.has(uid);
+    for (const n of [e.row, e.bg]) {
+      n.classList.toggle("selected", sel);
+      n.classList.toggle("match", match);
+    }
+    e.bar.classList.toggle("selected", sel);
+  }
+
   moveSelection(delta) {
-    const vis = this.visible();
+    const vis = this.vis;
     if (!vis.length) return;
     let i = vis.findIndex((t) => t.uid === this.selected);
     i = i < 0 ? 0 : Math.max(0, Math.min(vis.length - 1, i + delta));
@@ -181,7 +224,8 @@ export class Gantt {
   }
 
   search(text) {
-    this.matches.clear();
+    const old = this.matches;
+    this.matches = new Set();
     const q = text.trim().toLowerCase();
     if (q) {
       for (const t of this.tasks) {
@@ -190,15 +234,15 @@ export class Gantt {
         }
       }
     }
-    this.render();
+    for (const uid of old) if (!this.matches.has(uid)) this.highlight(uid);
+    for (const uid of this.matches) if (!old.has(uid)) this.highlight(uid);
     return [...this.matches];
   }
 
   scrollToTask(uid) {
-    const vis = this.visible();
-    const i = vis.findIndex((t) => t.uid === uid);
+    const i = this.vis.findIndex((t) => t.uid === uid);
     if (i < 0) return;
-    const t = vis[i];
+    const t = this.vis[i];
     const body = this.chartBody;
     const top = i * ROW;
     if (top < body.scrollTop || top > body.scrollTop + body.clientHeight - ROW * 2) {
@@ -230,180 +274,225 @@ export class Gantt {
     const end = addUnit(addUnit(startOfUnit(this.dataMax, z.major), z.major), z.minor);
     this.width = Math.max(this.x(end), this.chartBody.clientWidth);
 
-    const vis = this.visible();
-    this.renderGrid(vis);
+    this.vis = this.tasks.filter((t) => !this.isHidden(t));
+    this.rowOf = new Map(this.vis.map((t, i) => [t.uid, i]));
     this.renderScale(z);
-    this.renderBars(vis, z);
+    this.renderChart(z);
+    this.drawn = null;
+    this.renderRows();
   }
 
-  renderGrid(vis) {
-    const frag = document.createDocumentFragment();
-    for (const t of vis) {
-      const row = document.createElement("div");
-      row.className = "row";
-      if (t.summary) row.classList.add("summary");
-      if (t.uid === this.selected) row.classList.add("selected");
-      if (this.matches.has(t.uid)) row.classList.add("match");
-      if (this.options.critical && t.critical && !t.summary) row.classList.add("critical");
-      row.dataset.uid = t.uid;
+  // Draws the grid rows, row backgrounds, bars and links for the rows in and
+  // near the viewport. Cheap enough to run on every scroll frame.
+  renderRows() {
+    const body = this.chartBody;
+    const n = this.vis.length;
+    const first = Math.max(0, Math.floor(body.scrollTop / ROW) - OVERSCAN);
+    const last = Math.min(n, Math.ceil((body.scrollTop + body.clientHeight) / ROW) + OVERSCAN);
+    if (this.drawn && this.drawn.first === first && this.drawn.last === last) return;
+    this.drawn = { first, last };
+    const slice = this.vis.slice(first, last);
+
+    this.renderGrid(slice, first);
+    this.gRows.innerHTML = this.rowBackgrounds(slice, first);
+    this.gBars.innerHTML = this.barMarkup(slice, first);
+    this.gLinks.innerHTML = this.linkMarkup(first, last);
+
+    this.els.clear();
+    const rows = this.gridBody.querySelectorAll(".row");
+    const bgs = this.gRows.children;
+    const bars = this.gBars.children;
+    slice.forEach((t, i) => this.els.set(t.uid, { row: rows[i], bg: bgs[i], bar: bars[i] }));
+  }
+
+  renderGrid(slice, first) {
+    let html = `<div style="height:${first * ROW}px"></div>`;
+    slice.forEach((t, k) => {
+      let cls = (first + k) % 2 ? "row odd" : "row";
+      if (t.summary) cls += " summary";
+      if (t.uid === this.selected) cls += " selected";
+      if (this.matches.has(t.uid)) cls += " match";
+      if (this.options.critical && t.critical && !t.summary) cls += " critical";
 
       const caret = t.summary
         ? `<button class="caret" data-toggle="${t.uid}" aria-label="Toggle">${this.collapsed.has(t.uid) ? "▸" : "▾"}</button>`
         : `<span class="caret-space"></span>`;
       const indent = Math.max(0, (t.level || 1) - 1) * 14;
-      row.innerHTML = `
-        <div class="c-id">${t.id ?? ""}</div>
-        <div class="c-name" style="padding-left:${indent + 4}px">${caret}<span class="name">${escapeHtml(t.name || "")}</span>${t.milestone ? '<span class="ms-tag">◆</span>' : ""}</div>
-        <div class="c-dur">${escapeHtml(t.duration || "")}</div>
-        <div class="c-date">${fmtDate(t.startD)}</div>
-        <div class="c-date">${fmtDate(t.finishD)}</div>
-        <div class="c-pct">${t.percent != null ? Math.round(t.percent) + "%" : ""}</div>`;
-      row.title = t.name || "";
-      frag.appendChild(row);
-    }
-    this.gridBody.replaceChildren(frag);
-    // Spacer so grid and chart scroll to the same height (chart has a horizontal scrollbar).
-    const pad = document.createElement("div");
-    pad.style.height = "40px";
-    this.gridBody.appendChild(pad);
+      const name = escapeHtml(t.name || "");
+      html += `<div class="${cls}" data-uid="${t.uid}" title="${name}">` +
+        `<div class="c-id">${t.id ?? ""}</div>` +
+        `<div class="c-name" style="padding-left:${indent + 4}px">${caret}<span class="name">${name}</span>${t.milestone ? '<span class="ms-tag">◆</span>' : ""}</div>` +
+        `<div class="c-dur">${escapeHtml(t.duration || "")}</div>` +
+        `<div class="c-date">${fmtDate(t.startD)}</div>` +
+        `<div class="c-date">${fmtDate(t.finishD)}</div>` +
+        `<div class="c-pct">${t.percent != null ? Math.round(t.percent) + "%" : ""}</div>` +
+        `</div>`;
+    });
+    // Space for the rows not drawn, plus 40px so grid and chart scroll to the
+    // same height (the chart has a horizontal scrollbar).
+    const below = (this.vis.length - first - slice.length) * ROW;
+    this.gridBody.innerHTML = html + `<div style="height:${below + 40}px"></div>`;
   }
 
   renderScale(z) {
-    const svg = this.scaleSvg;
-    svg.replaceChildren();
-    svg.setAttribute("width", this.width);
-    svg.setAttribute("height", 44);
     const end = new Date(this.origin.getTime() + (this.width / this.px) * DAY);
+    let out = "";
 
     // Top tier: months or years.
     for (let d = startOfUnit(this.origin, z.major); d < end; d = addUnit(d, z.major)) {
       const x1 = Math.max(0, this.x(d));
       const x2 = this.x(addUnit(d, z.major));
-      el("line", { x1: this.x(d), x2: this.x(d), y1: 0, y2: 22, class: "tick-major" }, svg);
+      out += svg("line", { x1: this.x(d), x2: this.x(d), y1: 0, y2: 22, class: "tick-major" });
       const label = z.major === "month" ? `${MONTHS[d.getMonth()]} ${d.getFullYear()}` : String(d.getFullYear());
-      if (x2 - x1 > 40) el("text", { x: x1 + 6, y: 15, class: "scale-major" }, svg).textContent = label;
+      if (x2 - x1 > 40) out += svg("text", { x: x1 + 6, y: 15, class: "scale-major" }, label);
     }
-    el("line", { x1: 0, x2: this.width, y1: 22, y2: 22, class: "tick-major" }, svg);
+    out += svg("line", { x1: 0, x2: this.width, y1: 22, y2: 22, class: "tick-major" });
 
     // Bottom tier: days, weeks, months or quarters.
     for (let d = startOfUnit(this.origin, z.minor); d < end; d = addUnit(d, z.minor)) {
       const x1 = this.x(d);
       const w = this.x(addUnit(d, z.minor)) - x1;
-      el("line", { x1, x2: x1, y1: 22, y2: 44, class: "tick-minor" }, svg);
+      out += svg("line", { x1, x2: x1, y1: 22, y2: 44, class: "tick-minor" });
       const label = unitLabel(d, z.minor, w);
       if (label) {
-        const anchor = z.minor === "day" ? "middle" : "start";
-        el("text", { x: z.minor === "day" ? x1 + w / 2 : x1 + 4, y: 37, class: "scale-minor", "text-anchor": anchor }, svg).textContent = label;
+        const day = z.minor === "day";
+        out += svg("text", { x: day ? x1 + w / 2 : x1 + 4, y: 37, class: "scale-minor", "text-anchor": day ? "middle" : "start" }, label);
       }
     }
-    el("line", { x1: 0, x2: this.width, y1: 43.5, y2: 43.5, class: "tick-major" }, svg);
+    out += svg("line", { x1: 0, x2: this.width, y1: 43.5, y2: 43.5, class: "tick-major" });
+
+    this.scaleSvg.setAttribute("width", this.width);
+    this.scaleSvg.setAttribute("height", 44);
+    this.scaleSvg.innerHTML = out;
   }
 
-  renderBars(vis, z) {
-    const svg = this.barsSvg;
-    svg.replaceChildren();
-    const height = Math.max(vis.length * ROW, this.chartBody.clientHeight - 16);
-    svg.setAttribute("width", this.width);
-    svg.setAttribute("height", height);
-
-    const defs = el("defs", {}, svg);
-    const marker = el("marker", { id: "arrow", viewBox: "0 0 8 8", refX: 7, refY: 4, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" }, defs);
-    el("path", { d: "M0,0 L8,4 L0,8 z", class: "arrow-head" }, marker);
-
-    const bg = el("g", {}, svg);
-    const grid = el("g", {}, svg);
-    const links = el("g", { class: "links" }, svg);
-    const bars = el("g", {}, svg);
-
-    // Row stripes + selection.
-    vis.forEach((t, i) => {
-      const cls = t.uid === this.selected ? "row-bg selected" : this.matches.has(t.uid) ? "row-bg match" : i % 2 ? "row-bg odd" : "row-bg";
-      el("rect", { x: 0, y: i * ROW, width: this.width, height: ROW, class: cls, "data-uid": t.uid }, bg);
-    });
-
-    // Weekend shading and vertical grid lines.
+  // Draws the parts of the chart that don't depend on scrolling (non-working
+  // days, grid lines, today) and the empty layers renderRows() fills in.
+  renderChart(z) {
+    const height = Math.max(this.vis.length * ROW, this.chartBody.clientHeight - 16);
     const end = new Date(this.origin.getTime() + (this.width / this.px) * DAY);
+
+    // Non-working days (from the project calendar) and vertical grid lines.
+    let grid = "";
     if (z.minor === "day" || z.minor === "week") {
-      for (let d = new Date(this.origin); d < end; d = addUnit(d, "day")) {
-        const dow = d.getDay();
-        if (dow === 6) el("rect", { x: this.x(d), y: 0, width: this.px * 2, height, class: "weekend" }, grid);
+      let runStart = null;
+      for (let d = new Date(this.origin); d <= end; d = addUnit(d, "day")) {
+        const off = d < end && !this.workingDays.has(d.getDay());
+        if (off && !runStart) runStart = d;
+        if (!off && runStart) {
+          grid += svg("rect", { x: this.x(runStart), y: 0, width: this.x(d) - this.x(runStart), height, class: "weekend" });
+          runStart = null;
+        }
       }
     }
     for (let d = startOfUnit(this.origin, z.minor); d < end; d = addUnit(d, z.minor)) {
-      el("line", { x1: this.x(d), x2: this.x(d), y1: 0, y2: height, class: "grid-line" }, grid);
+      grid += svg("line", { x1: this.x(d), x2: this.x(d), y1: 0, y2: height, class: "grid-line" });
     }
 
     // Today marker.
     const today = new Date();
     if (today > this.origin && today < end) {
       const tx = this.x(today);
-      el("line", { x1: tx, x2: tx, y1: 0, y2: height, class: "today" }, grid);
+      grid += svg("line", { x1: tx, x2: tx, y1: 0, y2: height, class: "today" });
     }
 
-    const rowOf = new Map(vis.map((t, i) => [t.uid, i]));
+    const defs = svg("defs", {}, svg("marker", { id: "arrow", viewBox: "0 0 8 8", refX: 7, refY: 4, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" },
+      svg("path", { d: "M0,0 L8,4 L0,8 z", class: "arrow-head" })));
+    this.barsSvg.setAttribute("width", this.width);
+    this.barsSvg.setAttribute("height", height);
+    this.barsSvg.innerHTML = defs + svg("g", { class: "rows" }) + svg("g", {}, grid) +
+      svg("g", { class: "links" }) + svg("g", { class: "bars" });
+    this.gRows = this.barsSvg.querySelector(".rows");
+    this.gLinks = this.barsSvg.querySelector(".links");
+    this.gBars = this.barsSvg.querySelector(".bars");
+  }
 
-    // Bars.
-    vis.forEach((t, i) => {
-      const top = i * ROW;
-      const g = el("g", { class: "bar", "data-uid": t.uid }, bars);
-      const crit = this.options.critical && t.critical && !t.summary;
-      if (crit) g.classList.add("critical");
-      if (t.uid === this.selected) g.classList.add("selected");
-      const tip = el("title", {}, g);
-      tip.textContent = `${t.name || ""}\n${fmtDate(t.startD)} → ${fmtDate(t.finishD)}${t.duration ? ` (${t.duration})` : ""}${t.percent ? `\n${Math.round(t.percent)}% complete` : ""}`;
+  // Row stripes, selection and search highlights.
+  rowBackgrounds(slice, first) {
+    let out = "";
+    slice.forEach((t, k) => {
+      const i = first + k;
+      let cls = i % 2 ? "row-bg odd" : "row-bg";
+      if (this.matches.has(t.uid)) cls += " match";
+      if (t.uid === this.selected) cls += " selected";
+      out += svg("rect", { x: 0, y: i * ROW, width: this.width, height: ROW, class: cls, "data-uid": t.uid });
+    });
+    return out;
+  }
+
+  // Every drawn task gets a group, even without dates, so groups line up with
+  // rows by index.
+  barMarkup(slice, first) {
+    let out = "";
+    slice.forEach((t, k) => {
+      const top = (first + k) * ROW;
+      let cls = "bar";
+      if (this.options.critical && t.critical && !t.summary) cls += " critical";
+      if (t.uid === this.selected) cls += " selected";
+      const tip = `${t.name || ""}\n${fmtDate(t.startD)} → ${fmtDate(t.finishD)}${t.duration ? ` (${t.duration})` : ""}${t.percent ? `\n${Math.round(t.percent)}% complete` : ""}`;
+      let inner = svg("title", {}, escapeHtml(tip));
 
       if (this.options.baseline && t.bStartD && t.bFinishD) {
         const bx = this.x(t.bStartD);
         const bw = Math.max(2, this.x(t.bFinishD) - bx);
-        el("rect", { x: bx, y: top + 21, width: bw, height: 4, rx: 1, class: "baseline" }, g);
+        inner += svg("rect", { x: bx, y: top + 21, width: bw, height: 4, rx: 1, class: "baseline" });
       }
 
-      if (!t.startD || !t.finishD) return;
-      const x1 = this.x(t.startD);
-      const x2 = this.x(t.finishD);
-      let labelX;
+      if (t.startD && t.finishD) {
+        const x1 = this.x(t.startD);
+        const x2 = this.x(t.finishD);
+        let labelX;
 
-      if (t.milestone) {
-        const cy = top + ROW / 2;
-        el("path", { d: `M${x2},${cy - 7} L${x2 + 7},${cy} L${x2},${cy + 7} L${x2 - 7},${cy} Z`, class: "milestone" }, g);
-        labelX = x2 + 11;
-      } else if (t.summary) {
-        const w = Math.max(2, x2 - x1);
-        const y = top + 9;
-        el("path", {
-          d: `M${x1},${y} H${x1 + w} V${y + 10} L${x1 + w - 5},${y + 5} H${x1 + 5} L${x1},${y + 10} Z`,
-          class: "summary-bar",
-        }, g);
-        if (t.percent > 0) el("rect", { x: x1, y: y + 1, width: (w * Math.min(100, t.percent)) / 100, height: 3, class: "summary-progress" }, g);
-        labelX = x1 + w + 6;
-      } else {
-        const w = Math.max(3, x2 - x1);
-        el("rect", { x: x1, y: top + 7, width: w, height: 14, rx: 3, class: "task-bar" }, g);
-        if (t.percent > 0) {
-          el("rect", { x: x1, y: top + 7, width: (w * Math.min(100, t.percent)) / 100, height: 14, rx: 3, class: "task-progress" }, g);
+        if (t.milestone) {
+          const cy = top + ROW / 2;
+          inner += svg("path", { d: `M${x2},${cy - 7} L${x2 + 7},${cy} L${x2},${cy + 7} L${x2 - 7},${cy} Z`, class: "milestone" });
+          labelX = x2 + 11;
+        } else if (t.summary) {
+          const w = Math.max(2, x2 - x1);
+          const y = top + 9;
+          inner += svg("path", {
+            d: `M${x1},${y} H${x1 + w} V${y + 10} L${x1 + w - 5},${y + 5} H${x1 + 5} L${x1},${y + 10} Z`,
+            class: "summary-bar",
+          });
+          if (t.percent > 0) inner += svg("rect", { x: x1, y: y + 1, width: (w * Math.min(100, t.percent)) / 100, height: 3, class: "summary-progress" });
+          labelX = x1 + w + 6;
+        } else {
+          const w = Math.max(3, x2 - x1);
+          inner += svg("rect", { x: x1, y: top + 7, width: w, height: 14, rx: 3, class: "task-bar" });
+          if (t.percent > 0) {
+            inner += svg("rect", { x: x1, y: top + 7, width: (w * Math.min(100, t.percent)) / 100, height: 14, rx: 3, class: "task-progress" });
+          }
+          labelX = x1 + w + 6;
         }
-        labelX = x1 + w + 6;
-      }
 
-      const label = t.milestone ? fmtDate(t.finishD) : (t.resources || []).join(", ");
-      if (label) el("text", { x: labelX, y: top + 18, class: "bar-label" }, g).textContent = label;
+        const label = t.milestone ? fmtDate(t.finishD) : (t.resources || []).join(", ");
+        if (label) inner += svg("text", { x: labelX, y: top + 18, class: "bar-label" }, escapeHtml(label));
+      }
+      out += svg("g", { class: cls, "data-uid": t.uid }, inner);
     });
+    return out;
+  }
 
-    // Dependency links.
-    if (this.options.links) {
-      for (const t of vis) {
-        const si = rowOf.get(t.uid);
-        for (const p of t.predecessors || []) {
-          const pi = rowOf.get(p.uid);
-          const pt = this.byUid.get(p.uid);
-          if (pi == null || !pt || !pt.startD || !t.startD) continue;
-          const d = linkPath(this, pt, pi, t, si, p.type);
-          if (!d) continue;
-          const crit = this.options.critical && pt.critical && t.critical;
-          el("path", { d, class: crit ? "link critical" : "link", "marker-end": "url(#arrow)" }, links);
-        }
+  // Dependency links that pass through the drawn rows, including ones whose
+  // other end is off screen.
+  linkMarkup(first, last) {
+    if (!this.options.links) return "";
+    let out = "";
+    for (let si = 0; si < this.vis.length; si++) {
+      const t = this.vis[si];
+      if (!t.startD) continue;
+      for (const p of t.predecessors || []) {
+        const pi = this.rowOf.get(p.uid);
+        if (pi == null || Math.max(pi, si) < first || Math.min(pi, si) >= last) continue;
+        const pt = this.byUid.get(p.uid);
+        if (!pt || !pt.startD) continue;
+        const d = linkPath(this, pt, pi, t, si, p.type);
+        if (!d) continue;
+        const crit = this.options.critical && pt.critical && t.critical;
+        out += svg("path", { d, class: crit ? "link critical" : "link", "marker-end": "url(#arrow)" });
       }
     }
+    return out;
   }
 }
 

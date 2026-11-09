@@ -8,7 +8,7 @@
 
 - **[MPXJ](https://github.com/joniles/mpxj)** (LGPL) reads Microsoft's binary `.mpp` format. It also reads Primavera, Asta, GanttProject and other schedule formats.
 - **`converter/`** is a small Java program that uses MPXJ to turn a plan into JSON.
-- **`scripts/build-converter.sh`** uses `jlink` to build a trimmed private Java runtime, so users don't need Java installed.
+- **`scripts/build-converter.sh`** uses `jlink` to build a trimmed private Java runtime, so users don't need Java installed. The runtime includes the JDK's class-data-sharing archive; the app keeps a per-user archive of the converter's classes in `~/Library/Caches/com.leewsimpson.mppviewer`, which makes opening a file about 40% faster.
 - **`src-tauri/`** is the Rust/Tauri app shell. It runs the converter locally and handles "Open With" from Finder.
 - **`src/`** is the viewer UI: plain JavaScript and SVG with no network access.
 
@@ -28,6 +28,8 @@ npm run tauri dev        # run the app in development mode
 npm run app              # build a release .app and .dmg into src-tauri/target/release/bundle
 ```
 
+`npm run converter` ends with a smoke test of the converter. After building it, `cargo test --manifest-path src-tauri/Cargo.toml` checks how the app runs it.
+
 ## UI-only work
 
 You can work on the UI without Tauri. Run `npm run dev` and open `http://localhost:1420/?sample` in a browser. It loads `samples/office-fitout.json`, a plan made with the converter.
@@ -45,4 +47,6 @@ See [releasing.md](releasing.md).
 
 ## Third-party software
 
-MPXJ is licensed under the LGPL. It and its dependencies are bundled unmodified as separate jars in the app's `converter/lib` folder.
+MPXJ is licensed under the LGPL. It and its dependencies are bundled unmodified as separate jars in the app's `converter/lib` folder, with their license texts in `converter/licenses` (see [THIRD-PARTY-NOTICES.md](../converter/licenses/THIRD-PARTY-NOTICES.md)).
+
+`converter/pom.xml` leaves out MPXJ dependencies that only serve formats or features the viewer doesn't use, such as SQLite (Primavera and Asta databases) and Jackson (MPXJ's JSON writer). When upgrading MPXJ, check that list against its new dependencies, then open a few `.mpp` files of different Project versions. MPXJ's [test files](https://github.com/joniles/mpxj/tree/master/junit/data) are useful for this.
