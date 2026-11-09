@@ -28,7 +28,25 @@ npm run tauri dev        # run the app in development mode
 npm run app              # build a release .app and .dmg into src-tauri/target/release/bundle
 ```
 
-`npm run converter` ends with a smoke test of the converter. After building it, `cargo test --manifest-path src-tauri/Cargo.toml` checks how the app runs it.
+## Tests
+
+Every pull request runs these on GitHub Actions (`.github/workflows/ci.yml`), and a release is only built once they pass.
+
+| Command | What it checks |
+| --- | --- |
+| `npm run test:converter` | JUnit tests in `converter/src/test`: converts each file in `converter/src/test/resources/fixtures` (Project 98 to 2019 `.mpp`, XML, MPD, a password-protected file) and compares the result with the checked-in `.expected.json` |
+| `npm run converter` | Builds the bundled Java runtime, runs the JUnit tests, then converts every fixture with that runtime (catches a Java module missing from it) |
+| `npm run test:app` | Rust tests: how the app runs the converter, its class-data-sharing cache and error handling. Needs `npm run converter` and `npm run build` first |
+| `npm run test:ui` | Playwright tests of the viewer in Chromium and WebKit (the engine the Mac app uses), including a 5,000-task plan. Run `npx playwright install chromium webkit` once first. `npx playwright test --project=chromium` runs just one browser |
+
+`npm test` runs all of them.
+
+If the converter's output changes on purpose, or after an MPXJ upgrade, regenerate the expected files and review the diff:
+
+```bash
+mvn -f converter/pom.xml test -Dgolden.update=true
+git diff converter/src/test/resources/fixtures
+```
 
 ## UI-only work
 

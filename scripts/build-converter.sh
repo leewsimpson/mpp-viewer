@@ -112,12 +112,25 @@ if [[ -f "$SAMPLE" ]]; then
   [[ -s "$CDS_DIR/converter.jsa" ]] || { echo "Class-data-sharing archive was not created" >&2; exit 1; }
   echo "    converted sample OK"
 fi
+# Every test fixture through the bundled runtime (the Maven tests run on the
+# full JDK, so they can't catch a module missing from the trimmed runtime).
+for FIXTURE in "$CONV"/src/test/resources/fixtures/*; do
+  case "$FIXTURE" in *.json|*.md|*/readpassword*) continue ;; esac
+  "$JAVA" "${CDS[@]}" -jar "$DIST/mpp-converter.jar" "$FIXTURE" > "$CDS_DIR/out.json" 2> "$CDS_DIR/err.txt" \
+    || { echo "Could not convert $(basename "$FIXTURE"): $(cat "$CDS_DIR/err.txt")" >&2; exit 1; }
+  node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$CDS_DIR/out.json" \
+    || { echo "Converter stdout is not pure JSON for $(basename "$FIXTURE")" >&2; exit 1; }
+  [[ ! -s "$CDS_DIR/err.txt" ]] || { echo "Unexpected stderr for $(basename "$FIXTURE"): $(cat "$CDS_DIR/err.txt")" >&2; exit 1; }
+done
+echo "    converted all test fixtures OK"
 # Errors must reach the user as one readable line, without library noise.
 echo "not a project" > "$CDS_DIR/bad.mpp"
 if ERR="$("$JAVA" -jar "$DIST/mpp-converter.jar" "$CDS_DIR/bad.mpp" 2>&1 >/dev/null)"; then
   echo "Converter accepted an invalid file" >&2; exit 1
 fi
 [[ "$(printf '%s\n' "$ERR" | wc -l)" -eq 1 ]] || { echo "Unexpected converter error output: $ERR" >&2; exit 1; }
+ERR="$("$JAVA" -jar "$DIST/mpp-converter.jar" "$CONV/src/test/resources/fixtures/readpassword9.mpp" 2>&1 >/dev/null || true)"
+[[ "$ERR" == *"can't open password-protected files"* ]] || { echo "Unexpected password-protected error: $ERR" >&2; exit 1; }
 echo "    error output OK"
 
 du -sh "$DIST/runtime" "$DIST/lib" | sed 's/^/    /'

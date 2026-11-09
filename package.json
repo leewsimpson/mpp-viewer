@@ -9,13 +9,18 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "converter": "bash scripts/build-converter.sh",
-    "app": "bash scripts/build-converter.sh && tauri build"
+    "app": "bash scripts/build-converter.sh && tauri build",
+    "test": "npm run test:converter && npm run test:app && npm run test:ui",
+    "test:converter": "mvn -q -B -f converter/pom.xml test",
+    "test:app": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "test:ui": "playwright test"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.0",
     "@tauri-apps/plugin-dialog": "^2.8.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tauri-apps/cli": "^2.12.0",
     "vite": "^8.0.0"
   }
